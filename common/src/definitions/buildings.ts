@@ -49,15 +49,15 @@ export interface BuildingDefinition extends ObjectDefinition {
         readonly landCheckDist: number
     }
 
-    readonly obstacles: BuildingObstacle[]
-    readonly lootSpawners: LootSpawner[]
-    readonly subBuildings: SubBuilding[]
-    readonly decals: BuildingDecal[]
+    readonly obstacles: readonly BuildingObstacle[]
+    readonly lootSpawners: readonly LootSpawner[]
+    readonly subBuildings: readonly SubBuilding[]
+    readonly decals: readonly BuildingDecal[]
 
     readonly puzzle?: {
         readonly triggerInteractOn: ReferenceTo<ObstacleDefinition>
         readonly interactDelay: number
-        readonly order?: string[]
+        readonly order?: readonly string[]
         readonly solvedSound?: boolean
         /**
          * Don't wait for the interact delay before setting solved to true
@@ -73,7 +73,7 @@ export interface BuildingDefinition extends ObjectDefinition {
         readonly falloff: number
     }
 
-    readonly floorImages: Array<{
+    readonly floorImages: ReadonlyArray<{
         readonly key: string
         readonly position: Vector
         readonly rotation?: number
@@ -81,7 +81,7 @@ export interface BuildingDefinition extends ObjectDefinition {
         readonly tint?: number | `#${string}`
     }>
 
-    readonly ceilingImages: Array<{
+    readonly ceilingImages: ReadonlyArray<{
         readonly key: string
         readonly position: Vector
         readonly residue?: string
@@ -94,12 +94,12 @@ export interface BuildingDefinition extends ObjectDefinition {
      */
     readonly wallsToDestroy: number
 
-    readonly floors: Array<{
+    readonly floors: ReadonlyArray<{
         readonly type: keyof typeof FloorTypes
         readonly hitbox: Hitbox
     }>
 
-    readonly groundGraphics: Array<{
+    readonly groundGraphics: ReadonlyArray<{
         readonly color: number | `#${string}`
         readonly hitbox: Hitbox
     }>
@@ -1668,7 +1668,7 @@ export const Buildings = ObjectDefinitions.create<BuildingDefinition>()(
                 { idString: "pallet", position: Vec.create(-50, -55), rotation: 1 },
 
                 { idString: { flint_crate: 1, regular_crate: 1 }, position: Vec.create(-75, -45) },
-                { idString: "flint_crate", position: Vec.create(-50, -55.38) },
+                { idString: "flint_crate", position: Vec.create(-50, -55) },
 
                 // Top right corner above crane of the port
                 { idString: { regular_crate: 3, grenade_crate: 1 }, position: Vec.create(108, -110) },
@@ -2543,13 +2543,13 @@ export const Buildings = ObjectDefinitions.create<BuildingDefinition>()(
                 { idString: "tear_gas_crate", position: Vec.create(15.5, 52.5), rotation: 1 },
 
                 // South End of the Bridge
-                { idString: "barrel", position: Vec.create(-17.5, -80), rotation: 0 },
+                { idString: "barrel", position: Vec.create(17.5, 80), rotation: 0 },
 
-                { idString: "sandbags", position: Vec.create(-25, 80), rotation: 0 },
-                { idString: "sandbags", position: Vec.create(-36, 82.5), rotation: 1 },
-                { idString: "sandbags", position: Vec.create(-36, 96.5), rotation: 1 },
+                { idString: "sandbags", position: Vec.create(-25, 77), rotation: 0 },
+                { idString: "sandbags", position: Vec.create(-36, 79.5), rotation: 1 },
+                { idString: "sandbags", position: Vec.create(-36, 93.5), rotation: 1 },
 
-                { idString: "grenade_crate", position: Vec.create(-27.5, 88.5) }
+                { idString: "grenade_crate", position: Vec.create(-27.5, 85.5) }
             ],
             lootSpawners: [
 

@@ -27,14 +27,15 @@ export interface MapDefinition {
         readonly maxWideWidth: number
     }
 
-    readonly bridges?: Array<ReferenceTo<BuildingDefinition>>
-    readonly majorBuildings?: Array<ReferenceTo<BuildingDefinition>>
+    readonly bridges?: ReadonlyArray<ReferenceTo<BuildingDefinition>>
+    readonly majorBuildings?: ReadonlyArray<ReferenceTo<BuildingDefinition>>
     readonly buildings?: Record<ReferenceTo<BuildingDefinition>, number>
     readonly quadBuildingLimit?: Record<ReferenceTo<BuildingDefinition>, number>
     readonly obstacles?: Record<ReferenceTo<ObstacleDefinition>, number>
+    readonly obstacleClumps?: readonly ObstacleClump[]
     readonly loots?: Record<keyof typeof LootTables, number>
 
-    readonly places?: Array<{
+    readonly places?: ReadonlyArray<{
         readonly name: string
         readonly position: Vector
     }>
@@ -42,6 +43,26 @@ export interface MapDefinition {
     // Custom callback to generate stuff
     readonly genCallback?: (map: GameMap) => void
 }
+
+export type ObstacleClump = {
+    /**
+     * How many of these clumps per map
+     */
+    readonly clumpAmount: number
+    /**
+     * Data for any given clump
+     */
+    readonly clump: {
+        /**
+         * Id's of obstacles that may appear in the clump
+         */
+        readonly obstacles: ReadonlyArray<ReferenceTo<ObstacleDefinition>>
+        readonly minAmount: number
+        readonly maxAmount: number
+        readonly radius: number
+        readonly jitter: number
+    }
+};
 
 const maps = {
     main: {
@@ -69,7 +90,7 @@ const maps = {
             armory: 1,
             refinery: 1,
             warehouse: 5,
-            firework_warehouse: 1, // 1y bday building
+            // firework_warehouse: 1, // birthday mode
             green_house: 2,
             red_house: 6,
             construction_site: 1,
@@ -90,14 +111,17 @@ const maps = {
             green_house: 1,
             mobile_home: 3,
             porta_potty: 3,
-            construction_site: 1
+            construction_site: 1,
+            armory: 1,
+            port_complex: 1,
+            refinery: 1
         },
         obstacles: {
             oil_tank: 12,
             // christmas_tree: 1, // winter mode
-            oak_tree: 250,
-            birch_tree: 25,
-            pine_tree: 15,
+            oak_tree: 100,
+            birch_tree: 20,
+            pine_tree: 10,
             regular_crate: 160,
             flint_crate: 5,
             aegis_crate: 5,
@@ -106,7 +130,7 @@ const maps = {
             river_chest: 1,
             river_rock: 45,
             bush: 110,
-            birthday_cake: 100,
+            // birthday_cake: 100, // birthday mode
             lily_pad: 20,
             blueberry_bush: 30,
             barrel: 80,
@@ -114,8 +138,41 @@ const maps = {
             super_barrel: 30,
             melee_crate: 1,
             gold_rock: 1,
+            loot_tree: 1,
             flint_stone: 1
         },
+        obstacleClumps: [
+            {
+                clumpAmount: 100,
+                clump: {
+                    minAmount: 2,
+                    maxAmount: 3,
+                    jitter: 5,
+                    obstacles: ["oak_tree"],
+                    radius: 12
+                }
+            },
+            {
+                clumpAmount: 25,
+                clump: {
+                    minAmount: 2,
+                    maxAmount: 3,
+                    jitter: 5,
+                    obstacles: ["birch_tree"],
+                    radius: 12
+                }
+            },
+            {
+                clumpAmount: 4,
+                clump: {
+                    minAmount: 2,
+                    maxAmount: 3,
+                    jitter: 5,
+                    obstacles: ["pine_tree"],
+                    radius: 12
+                }
+            }
+        ],
         loots: {
             ground_loot: 60
         },
@@ -371,7 +428,7 @@ const maps = {
         beachSize: 8,
         oceanSize: 8,
         genCallback(map) {
-            map.generateObstacle("bunker_entrance_door", Vec.create(this.width / 2, this.height / 2), 0);
+            map.generateObstacle("test_wall", Vec.create(this.width / 2, this.height / 2), 0);
         }
     },
     singleGun: {
@@ -380,8 +437,8 @@ const maps = {
         beachSize: 8,
         oceanSize: 8,
         genCallback(map) {
-            map.game.addLoot("vector", Vec.create(this.width / 2, this.height / 2 - 10));
-            map.game.addLoot("9mm", Vec.create(this.width / 2, this.height / 2 - 10), { count: Infinity });
+            map.game.addLoot("radio", Vec.create(this.width / 2, this.height / 2 - 10));
+            map.game.addLoot("curadell", Vec.create(this.width / 2, this.height / 2 - 10), { count: Infinity });
         }
     },
     gunsTest: (() => {

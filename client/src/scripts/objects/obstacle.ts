@@ -1,7 +1,8 @@
+import { Graphics } from "pixi.js";
 import { ObjectCategory, ZIndexes } from "../../../../common/src/constants";
 import { type ObstacleDefinition } from "../../../../common/src/definitions/obstacles";
 import { type Orientation, type Variation } from "../../../../common/src/typings";
-import { CircleHitbox, type Hitbox, type RectangleHitbox } from "../../../../common/src/utils/hitbox";
+import { CircleHitbox, RectangleHitbox, type Hitbox } from "../../../../common/src/utils/hitbox";
 import { Angle, EaseFunctions, Numeric, calculateDoorHitboxes } from "../../../../common/src/utils/math";
 import { ObstacleSpecialRoles } from "../../../../common/src/utils/objectDefinitions";
 import { type ObjectsNetData } from "../../../../common/src/utils/objectsSerializations";
@@ -10,7 +11,7 @@ import { FloorTypes } from "../../../../common/src/utils/terrain";
 import { Vec, type Vector } from "../../../../common/src/utils/vector";
 import { type Game } from "../game";
 import { type GameSound } from "../managers/soundManager";
-import { HITBOX_COLORS, HITBOX_DEBUG_MODE, PIXI_SCALE } from "../utils/constants";
+import { HITBOX_COLORS, HITBOX_DEBUG_MODE, PIXI_SCALE, WALL_STROKE_WIDTH } from "../utils/constants";
 import { SuroiSprite, drawHitbox, toPixiCoords } from "../utils/pixi";
 import { GameObject } from "./gameObject";
 import { type ParticleEmitter, type ParticleOptions } from "./particles";
@@ -58,7 +59,7 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
 
     hitSound?: GameSound;
 
-    constructor(game: Game, id: number, data: Required<ObjectsNetData[ObjectCategory.Obstacle]>) {
+    constructor(game: Game, id: number, data: ObjectsNetData[ObjectCategory.Obstacle]) {
         super(game, id);
 
         this.image = new SuroiSprite();
@@ -102,6 +103,11 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
                         speed: Vec.fromPolar(randomFloat(-1.9, -2.1), randomFloat(5, 6))
                     })
                 });
+            }
+
+            if (definition.sound && !definition.role && !this.destroyed) {
+                if ("names" in definition.sound) definition.sound.names.forEach(name => this.playSound(name, definition.sound));
+                else this.playSound(definition.sound.name, definition.sound);
             }
 
             if (this.activated !== full.activated) {
@@ -247,9 +253,35 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
 
         if (this.variation !== undefined && !this.dead) texture += `_${this.variation + 1}`;
 
-        this.image.setFrame(texture);
+        if (!definition.invisible && !definition.wall && !(this.dead && definition.noResidue)) this.image.setFrame(texture);
 
         if (definition.tint !== undefined) this.image.setTint(definition.tint);
+
+        if (definition.wall && !this.dead && definition.hitbox instanceof RectangleHitbox) {
+            this.container.removeChildren();
+
+            const dimensions = definition.hitbox.clone();
+            dimensions.scale(PIXI_SCALE);
+
+            const wallGraphics = new Graphics();
+
+            const x = dimensions.min.x;
+            const y = dimensions.min.y;
+            const w = dimensions.max.x - dimensions.min.x;
+            const h = dimensions.max.y - dimensions.min.y;
+
+            wallGraphics
+                .rect(x, y, w, h)
+                .fill({ color: definition.wall.borderColor })
+                .roundRect(x + WALL_STROKE_WIDTH, y + WALL_STROKE_WIDTH, w - WALL_STROKE_WIDTH * 2, h - WALL_STROKE_WIDTH * 2, WALL_STROKE_WIDTH)
+                .fill({ color: definition.wall.color });
+
+            this.container.addChild(wallGraphics);
+        }
+        if (definition.wall && this.dead) {
+            this.container.removeChildren();
+            if (!definition.noResidue) this.container.addChild(this.image);
+        }
 
         this.container.rotation = this.rotation;
 
@@ -318,7 +350,13 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
         switch (definition.operationStyle) {
             case "slide":
                 if (isNew) {
-                    const x = offset ? (definition.slideFactor ?? 1) * (backupHitbox.min.x - backupHitbox.max.x) * PIXI_SCALE : 0;
+                    const x = offset
+                        ? (definition.slideFactor ?? 1) * (
+                            this.orientation & 1
+                                ? backupHitbox.min.y - backupHitbox.max.y
+                                : backupHitbox.min.x - backupHitbox.max.x
+                        ) * PIXI_SCALE
+                        : 0;
                     this.image.setPos(x, 0);
                 }
                 break;
@@ -335,9 +373,7 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
 
         if (isNew) {
             this._door.offset = offset;
-        }
-
-        if (offset !== this._door.offset && !isNew) {
+        } else if (offset !== this._door.offset) {
             this._door.offset = offset;
 
             const soundName = definition.doorSound ?? "door";
@@ -356,7 +392,14 @@ export class Obstacle extends GameObject<ObjectCategory.Obstacle> {
                     duration: definition.animationDuration ?? 150
                 });
             } else {
-                const x = offset ? (definition.slideFactor ?? 1) * (backupHitbox.min.x - backupHitbox.max.x) * PIXI_SCALE : 0;
+                const x = offset
+                    ? (definition.slideFactor ?? 1) * (
+                        this.orientation & 1
+                            ? backupHitbox.min.y - backupHitbox.max.y
+                            : backupHitbox.min.x - backupHitbox.max.x
+                    ) * PIXI_SCALE
+                    : 0;
+
                 this.game.addTween({
                     target: this.image.position,
                     to: { x, y: 0 },

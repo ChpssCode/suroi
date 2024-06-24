@@ -4,6 +4,14 @@ import { type Result, type ResultRes } from "../../../../../common/src/utils/mis
 import { type Stringable } from "./gameConsole";
 import { Casters, type CVarChangeListener, type CVarFlags, type ConVar, type ExtractConVarValue } from "./variables";
 
+/*
+    eslint-disable
+    @stylistic/indent-binary-ops
+*/
+
+/*
+    `@stylistic/indent-binary-ops`: ESLint sucks at indenting types correctly
+*/
 export interface JSONCVar<Value extends Stringable> {
     readonly value: Value
     readonly flags: Partial<CVarFlags>
@@ -41,8 +49,10 @@ export const CVarCasters = Object.freeze({
     cv_renderer: Casters.generateUnionCaster(["webgl1", "webgl2", "webgpu"]),
     cv_renderer_res: Casters.generateUnionCaster(["auto", "0.5", "1", "2", "3"]),
     cv_high_res_textures: Casters.toBoolean,
+    cv_cooler_graphics: Casters.toBoolean,
     cv_blur_splash: Casters.toBoolean,
     cv_minimap_minimized: Casters.toBoolean,
+    cv_map_expanded: Casters.toBoolean,
     cv_leave_warning: Casters.toBoolean,
     cv_ui_scale: Casters.toNumber,
     cv_minimap_transparency: Casters.toNumber,
@@ -54,6 +64,7 @@ export const CVarCasters = Object.freeze({
     cv_console_height: Casters.toNumber,
     cv_console_left: Casters.toNumber,
     cv_console_top: Casters.toNumber,
+    cv_console_open: Casters.toBoolean,
     cv_crosshair_color: Casters.toString,
     cv_crosshair_size: Casters.toNumber,
     cv_crosshair_stroke_color: Casters.toString,
@@ -84,10 +95,27 @@ export type CVarTypeMapping = {
 };
 
 type SimpleCVarMapping = {
-    [K in keyof typeof CVarCasters]: ExtractConVarValue<CVarTypeMapping[K]> | {
-        readonly value: ExtractConVarValue<CVarTypeMapping[K]>
-        readonly changeListeners: CVarChangeListener<ExtractConVarValue<CVarTypeMapping[K]>> | Array<CVarChangeListener<ExtractConVarValue<CVarTypeMapping[K]>>>
-    }
+    [K in keyof typeof CVarCasters]: ExtractConVarValue<CVarTypeMapping[K]> extends infer Val
+        ? Val | (
+            {
+                readonly value: Val
+            } & (
+                {
+                    readonly changeListeners: CVarChangeListener<Val> | Array<CVarChangeListener<Val>>
+                } |
+                {
+                    readonly changeListeners?: never
+                }
+            ) & (
+                {
+                    readonly flags: Partial<CVarFlags>
+                } |
+                {
+                    readonly flags?: never
+                }
+            )
+        )
+        : never
 };
 
 export const defaultClientCVars: SimpleCVarMapping = Object.freeze({
@@ -121,14 +149,27 @@ export const defaultClientCVars: SimpleCVarMapping = Object.freeze({
     cv_renderer: "webgl2",
     cv_renderer_res: "auto",
     cv_high_res_textures: true,
+    cv_cooler_graphics: false,
     cv_blur_splash: !isMobile.any, // blur kills splash screen performance on phones from my testing
 
     cv_rules_acknowledged: false,
     cv_hide_rules_button: false,
     cv_leave_warning: true,
     cv_ui_scale: 1,
+    cv_draw_hud: true,
 
-    cv_minimap_minimized: false,
+    cv_map_expanded: {
+        value: false,
+        flags: {
+            archive: false
+        }
+    },
+    cv_minimap_minimized: {
+        value: false,
+        flags: {
+            archive: false
+        }
+    },
     cv_minimap_transparency: 0.8,
     cv_map_transparency: 0.9,
 
@@ -136,6 +177,12 @@ export const defaultClientCVars: SimpleCVarMapping = Object.freeze({
     cv_console_height: window.innerWidth / 2,
     cv_console_left: window.innerWidth / 4,
     cv_console_top: window.innerWidth / 4,
+    cv_console_open: {
+        value: false,
+        flags: {
+            archive: false
+        }
+    },
 
     cv_crosshair_color: "#000000",
     cv_crosshair_size: 1.5,
@@ -146,7 +193,6 @@ export const defaultClientCVars: SimpleCVarMapping = Object.freeze({
     cv_autopickup_dual_guns: true,
 
     // unused for now
-    cv_draw_hud: true,
     cv_language: "en",
     cv_mute_audio: false,
     //
@@ -199,5 +245,7 @@ export const defaultBinds = Object.freeze({
     "toggle_hud": [],
     "+emote_wheel": ["Mouse2"],
     "+map_ping_wheel": ["C"],
-    "toggle_console": []
+    "toggle_console": [],
+    "+map_ping": [],
+    "toggle_slot_lock": []
 } as Record<string, string[]>);

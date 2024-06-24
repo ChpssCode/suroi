@@ -16,7 +16,7 @@ export const HITBOX_COLORS = {
     playerWeapon: new Color("lime")
 };
 
-// validaed by dv
+// validated by dv
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 export const MODE = Modes.find(m => m.idString === Config.mode)!;
 
@@ -40,6 +40,8 @@ export const TEAMMATE_COLORS = [
 ];
 
 export const PIXI_SCALE = 20;
+
+export const WALL_STROKE_WIDTH = 8;
 
 export const FIRST_EMOTE_ANGLE = Math.atan2(-1, -1);
 export const SECOND_EMOTE_ANGLE = Math.atan2(1, 1);

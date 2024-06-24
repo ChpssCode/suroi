@@ -1,8 +1,7 @@
 import { sound, type Sound } from "@pixi/sound";
-import $ from "jquery";
 import { Application, Color } from "pixi.js";
 import "pixi.js/prepare";
-import { InputActions, ObjectCategory, PlayerActions, TeamSize } from "../../../common/src/constants";
+import { InputActions, ObjectCategory, TeamSize } from "../../../common/src/constants";
 import { ArmorType } from "../../../common/src/definitions/armors";
 import { Badges, type BadgeDefinition } from "../../../common/src/definitions/badges";
 import { Emotes } from "../../../common/src/definitions/emotes";
@@ -26,7 +25,7 @@ import { Geometry } from "../../../common/src/utils/math";
 import { Timeout } from "../../../common/src/utils/misc";
 import { ItemType, ObstacleSpecialRoles } from "../../../common/src/utils/objectDefinitions";
 import { ObjectPool } from "../../../common/src/utils/objectPool";
-import { type FullData } from "../../../common/src/utils/objectsSerializations";
+import { type ObjectsNetData } from "../../../common/src/utils/objectsSerializations";
 import { InputManager } from "./managers/inputManager";
 import { SoundManager } from "./managers/soundManager";
 import { UIManager } from "./managers/uiManager";
@@ -55,7 +54,9 @@ import { COLORS, MODE, PIXI_SCALE, UI_DEBUG_MODE, emoteSlots } from "./utils/con
 import { loadTextures } from "./utils/pixi";
 import { Tween } from "./utils/tween";
 
-interface ObjectClassMapping {
+/* eslint-disable @stylistic/indent */
+
+type ObjectClassMapping = {
     readonly [ObjectCategory.Player]: typeof Player
     readonly [ObjectCategory.Obstacle]: typeof Obstacle
     readonly [ObjectCategory.DeathMarker]: typeof DeathMarker
@@ -65,9 +66,11 @@ interface ObjectClassMapping {
     readonly [ObjectCategory.Parachute]: typeof Parachute
     readonly [ObjectCategory.ThrowableProjectile]: typeof ThrowableProjectile
     readonly [ObjectCategory.SyncedParticle]: typeof SyncedParticle
-}
+};
 
-const ObjectClassMapping: ObjectClassMapping = {
+const ObjectClassMapping: ObjectClassMapping = Object.freeze<{
+    readonly [K in ObjectCategory]: new (game: Game, id: number, data: ObjectsNetData[K]) => InstanceType<ObjectClassMapping[K]>
+}>({
     [ObjectCategory.Player]: Player,
     [ObjectCategory.Obstacle]: Obstacle,
     [ObjectCategory.DeathMarker]: DeathMarker,
@@ -77,7 +80,7 @@ const ObjectClassMapping: ObjectClassMapping = {
     [ObjectCategory.Parachute]: Parachute,
     [ObjectCategory.ThrowableProjectile]: ThrowableProjectile,
     [ObjectCategory.SyncedParticle]: SyncedParticle
-};
+});
 
 type ObjectMapping = {
     readonly [Cat in keyof ObjectClassMapping]: InstanceType<ObjectClassMapping[Cat]>
@@ -98,7 +101,6 @@ export class Game {
     }>();
 
     activePlayerID = -1;
-
     teamID = -1;
 
     teamMode = false;
@@ -112,19 +114,18 @@ export class Game {
     spectating = false;
     error = false;
 
-    readonly uiManager = new UIManager(this);
-
     lastPingDate = 0;
 
     disconnectReason = "";
 
+    readonly uiManager = new UIManager(this);
     readonly pixi = new Application();
-    readonly soundManager: SoundManager;
     readonly particleManager = new ParticleManager(this);
     readonly map = new Minimap(this);
     readonly camera = new Camera(this);
     readonly console = new GameConsole(this);
     readonly inputManager = new InputManager(this);
+    readonly soundManager = new SoundManager(this);
 
     readonly gasRender = new GasRender(PIXI_SCALE);
     readonly gas = new Gas(this);
@@ -141,7 +142,13 @@ export class Game {
         return timeout;
     }
 
+    private static _instantiated = false;
     constructor() {
+        if (Game._instantiated) {
+            throw new Error("Class 'Game' has already been instantiated.");
+        }
+        Game._instantiated = true;
+
         this.console.readFromLocalStorage();
         this.inputManager.setupInputs();
 
@@ -169,8 +176,9 @@ export class Game {
                 }
             });
 
+            const pixi = this.pixi;
             await loadTextures(
-                this.pixi.renderer,
+                pixi.renderer,
                 this.inputManager.isMobile
                     ? this.console.getBuiltInCVar("mb_high_res_textures")
                     : this.console.getBuiltInCVar("cv_high_res_textures")
@@ -178,8 +186,8 @@ export class Game {
 
             // HACK: the game ui covers the canvas
             // so send pointer events manually to make clicking to spectate players work
-            $("#game-ui")[0].addEventListener("pointerdown", e => {
-                this.pixi.canvas.dispatchEvent(new PointerEvent("pointerdown", {
+            this.uiManager.ui.gameUi[0].addEventListener("pointerdown", e => {
+                pixi.canvas.dispatchEvent(new PointerEvent("pointerdown", {
                     pointerId: e.pointerId,
                     button: e.button,
                     clientX: e.clientX,
@@ -189,18 +197,18 @@ export class Game {
                 }));
             });
 
-            this.pixi.ticker.add(this.render.bind(this));
-            this.pixi.stage.addChild(
+            pixi.ticker.add(this.render.bind(this));
+            pixi.stage.addChild(
                 this.camera.container,
                 this.map.container,
                 this.map.mask
             );
 
-            if (this.console.getBuiltInCVar("cv_minimap_minimized")) {
-                this.map.toggleMinimap();
-            }
+            this.map.visible = !this.console.getBuiltInCVar("cv_minimap_minimized");
+            this.map.expanded = this.console.getBuiltInCVar("cv_map_expanded");
+            this.uiManager.ui.gameUi.toggle(this.console.getBuiltInCVar("cv_draw_hud"));
 
-            this.pixi.renderer.on("resize", () => this.resize());
+            pixi.renderer.on("resize", () => this.resize());
             this.resize();
 
             setInterval(() => {
@@ -219,7 +227,6 @@ export class Game {
         });
 
         setUpCommands(this);
-        this.soundManager = new SoundManager(this);
         this.inputManager.generateBindsConfigScreen();
 
         this.music = sound.add("menu_music", {
@@ -253,12 +260,14 @@ export class Game {
 
             if (!UI_DEBUG_MODE) {
                 clearTimeout(this.uiManager.gameOverScreenTimeout);
-                $("#game-over-overlay").hide();
-                $("#kill-msg").hide();
-                $("#ui-kills").text("0");
-                $("#kill-feed").html("");
-                $("#spectating-container").hide();
-                $("#joysticks-containers").show();
+                const ui = this.uiManager.ui;
+
+                ui.gameOverOverlay.hide();
+                ui.killMsgModal.hide();
+                ui.killMsgCounter.text("0");
+                ui.killFeed.html("");
+                ui.spectatingContainer.hide();
+                ui.joystickContainer.show();
             }
 
             this.sendPacket(new PingPacket());
@@ -268,15 +277,13 @@ export class Game {
             joinPacket.isMobile = this.inputManager.isMobile;
             joinPacket.name = this.console.getBuiltInCVar("cv_player_name");
 
-            // why are you enforcing this here and not in the giant file filled from top-to-bottom with snake case
-
-            let cv_loadout_skin: typeof defaultClientCVars["cv_loadout_skin"];
+            let skin: typeof defaultClientCVars["cv_loadout_skin"];
             joinPacket.skin = Loots.fromStringSafe(
                 this.console.getBuiltInCVar("cv_loadout_skin")
             ) ?? Loots.fromString(
-                typeof (cv_loadout_skin = defaultClientCVars.cv_loadout_skin) === "object"
-                    ? cv_loadout_skin.value
-                    : cv_loadout_skin
+                typeof (skin = defaultClientCVars.cv_loadout_skin) === "object"
+                    ? skin.value
+                    : skin
             );
 
             joinPacket.badge = Badges.fromStringSafe(this.console.getBuiltInCVar("cv_loadout_badge"));
@@ -306,10 +313,12 @@ export class Game {
             }
         };
 
+        const ui = this.uiManager.ui;
+
         this._socket.onerror = (): void => {
             this.error = true;
-            $("#splash-server-message-text").html("Error joining game.");
-            $("#splash-server-message").show();
+            ui.splashMsgText.html("Error joining game.");
+            ui.splashMsg.show();
             resetPlayButtons();
         };
 
@@ -320,15 +329,15 @@ export class Game {
 
             if (!this.gameOver) {
                 if (this.gameStarted) {
-                    $("#splash-ui").fadeIn(400);
-                    $("#splash-server-message-text").html(this.disconnectReason || "Connection lost.");
-                    $("#splash-server-message").show();
+                    ui.splashUi.fadeIn(400);
+                    ui.splashMsgText.html(this.disconnectReason || "Connection lost.");
+                    ui.splashMsg.show();
                 }
-                $("#btn-spectate").addClass("btn-disabled");
+                this.uiManager.ui.btnSpectate.addClass("btn-disabled");
                 if (!this.error) void this.endGame();
             }
 
-            if (reason === "Invalid game version") {
+            if (reason.startsWith("Invalid game version")) {
                 alert(reason);
                 // reload the page with a time stamp to try clearing cache
                 location.search = `t=${Date.now()}`;
@@ -363,9 +372,10 @@ export class Game {
                 break;
             }
             case packet instanceof ReportPacket: {
-                $("#reporting-name").text(packet.playerName);
-                $("#report-id").text(packet.reportID);
-                $("#report-modal").fadeIn(250);
+                const ui = this.uiManager.ui;
+                ui.reportingName.text(packet.playerName);
+                ui.reportingId.text(packet.reportID);
+                ui.reportingModal.fadeIn(250);
                 break;
             }
             case packet instanceof PickupPacket: {
@@ -412,35 +422,39 @@ export class Game {
         this.uiManager.emotes = packet.emotes;
         this.uiManager.updateEmoteWheel();
 
+        const ui = this.uiManager.ui;
+
         this.teamID = packet.teamID;
         this.teamMode = packet.maxTeamSize > TeamSize.Solo;
 
-        $("canvas").addClass("active");
-        $("#splash-ui").fadeOut(400, resetPlayButtons);
+        ui.canvas.addClass("active");
+        ui.splashUi.fadeOut(400, resetPlayButtons);
 
-        $("#kill-leader-leader").html("Waiting for leader");
-        $("#kill-leader-kills-counter").text("0");
-        $("#btn-spectate-kill-leader").addClass("btn-disabled");
+        ui.killLeaderLeader.html("Waiting for leader");
+        ui.killLeaderCount.text("0");
+        ui.spectateKillLeader.addClass("btn-disabled");
 
-        this.uiManager.ui.teamContainer.toggle(this.teamMode);
+        ui.teamContainer.toggle(this.teamMode);
     }
 
     async endGame(): Promise<void> {
+        const ui = this.uiManager.ui;
+
         return await new Promise(resolve => {
-            $("#splash-options").addClass("loading");
+            ui.splashOptions.addClass("loading");
 
             this.soundManager.stopAll();
 
             void this.music.play();
 
-            $("#splash-ui").fadeIn(400, () => {
-                $("#team-container").html("");
-                $("#action-container").hide();
-                $("#game-menu").hide();
-                $("#game-over-overlay").hide();
-                $("canvas").removeClass("active");
-                $("#kill-leader-leader").text("Waiting for leader");
-                $("#kill-leader-kills-counter").text("0");
+            ui.splashUi.fadeIn(400, () => {
+                ui.teamContainer.html("");
+                ui.actionContainer.hide();
+                ui.gameMenu.hide();
+                ui.gameOverOverlay.hide();
+                ui.canvas.removeClass("active");
+                ui.killLeaderLeader.text("Waiting for leader");
+                ui.killLeaderCount.text("0");
 
                 this.gameStarted = false;
                 this._socket?.close();
@@ -468,17 +482,17 @@ export class Game {
 
                 this.camera.zoom = Scopes.definitions[0].zoomLevel;
                 resetPlayButtons();
-                if (teamSocket) $("#create-team-menu").fadeIn(250, resolve);
+                if (teamSocket) ui.createTeamMenu.fadeIn(250, resolve);
                 else resolve();
             });
         });
     }
 
-    packetStream = new PacketStream(new ArrayBuffer(1024));
+    private readonly _packetStream = new PacketStream(new ArrayBuffer(1024));
     sendPacket(packet: Packet): void {
-        this.packetStream.stream.index = 0;
-        this.packetStream.serializeClientPacket(packet);
-        this.sendData(this.packetStream.getBuffer());
+        this._packetStream.stream.index = 0;
+        this._packetStream.serializeClientPacket(packet);
+        this.sendData(this._packetStream.getBuffer());
     }
 
     sendData(buffer: ArrayBuffer): void {
@@ -577,7 +591,6 @@ export class Game {
         }
 
         const playerData = updateData.playerData;
-
         if (playerData) this.uiManager.updateUI(playerData);
 
         for (const deletedPlayerId of updateData.deletedPlayers) {
@@ -589,23 +602,25 @@ export class Game {
 
             if (object === undefined || object.destroyed) {
                 type K = typeof type;
+
                 this.objects.add(
                     new (
-                        ObjectClassMapping[type] as (new (game: Game, id: number, data: FullData<K>) => ObjectMapping[K])
+                        ObjectClassMapping[type] as new (game: Game, id: number, data: ObjectsNetData[K]) => InstanceType<ObjectClassMapping[K]>
                     )(this, id, data)
                 );
-            }
-
-            if (object) {
+            } else {
                 object.updateFromData(data, false);
             }
         }
 
         for (const { id, data } of updateData.partialDirtyObjects) {
             const object = this.objects.get(id);
-            if (object) {
-                (object as GameObject).updateFromData(data, false);
+            if (object === undefined) {
+                console.warn(`Trying to partially update non-existant object with ID ${id}`);
+                continue;
             }
+
+            (object as GameObject).updateFromData(data, false);
         }
 
         for (const id of updateData.deletedObjects) {
@@ -616,11 +631,7 @@ export class Game {
             }
 
             object.destroy();
-
-            // If it's a teammate, do NOT remove the object.
-            if (!(object instanceof Player && object.teamID === this.teamID)) {
-                this.objects.delete(object);
-            }
+            this.objects.delete(object);
         }
 
         for (const bullet of updateData.deserializedBullets) {
@@ -645,8 +656,9 @@ export class Game {
         this.gas.updateFrom(updateData);
 
         if (updateData.aliveCount !== undefined) {
-            $("#ui-players-alive").text(updateData.aliveCount);
-            $("#btn-spectate").toggle(updateData.aliveCount > 1);
+            const ui = this.uiManager.ui;
+            ui.playerAlive.text(updateData.aliveCount);
+            ui.btnSpectate.toggle(updateData.aliveCount > 1);
         }
 
         for (const plane of updateData.planes) {
@@ -758,7 +770,7 @@ export class Game {
             const offset = object instanceof Obstacle ? object.door?.offset : undefined;
             canInteract = interactable.object !== undefined;
 
-            const bind = this.inputManager.binds.getInputsBoundToAction(object === undefined ? "cancel_action" : "interact")[0];
+            const bind: string | undefined = this.inputManager.binds.getInputsBoundToAction(object === undefined ? "cancel_action" : "interact")[0];
 
             const differences = {
                 object: cache.object?.id !== object?.id,
@@ -784,50 +796,54 @@ export class Game {
                 cache.bind = bind;
                 cache.canInteract = canInteract;
 
-                const { interactKey, interactMsg } = this.uiManager.ui;
+                const {
+                    interactKey,
+                    interactMsg,
+                    interactText
+                } = this.uiManager.ui;
                 const type = object instanceof Loot ? object.definition.itemType : undefined;
 
                 // Update interact message
                 if (object !== undefined || (isAction && showCancel)) {
                     // If the loot object hasn't changed, we don't need to redo the text
                     if (differences.object || differences.offset || differences.isAction) {
-                        let interactText;
+                        let text;
                         switch (true) {
                             case object instanceof Obstacle: {
                                 switch (object.definition.role) {
                                     case ObstacleSpecialRoles.Door:
-                                        interactText = object.door?.offset === 0 ? "Open Door" : "Close Door";
+                                        text = object.door?.offset === 0 ? "Open Door" : "Close Door";
                                         break;
                                     case ObstacleSpecialRoles.Activatable:
-                                        interactText = `${object.definition.interactText} ${object.definition.name}`;
+                                        text = `${object.definition.interactText} ${object.definition.name}`;
                                         break;
                                 }
                                 break;
                             }
                             case object instanceof Loot: {
-                                interactText = `${object.definition.name}${object.count > 1 ? ` (${object.count})` : ""}`;
+                                text = `${object.definition.name}${object.count > 1 ? ` (${object.count})` : ""}`;
                                 break;
                             }
                             case object instanceof Player: {
-                                interactText = `Revive ${this.uiManager.getRawPlayerName(object.id)}`;
+                                text = `Revive ${this.uiManager.getRawPlayerName(object.id)}`;
                                 break;
                             }
                             case isAction: {
-                                interactText = "Cancel";
+                                text = "Cancel";
                                 break;
                             }
                         }
 
-                        if (interactText) $("#interact-text").text(interactText);
+                        if (text) interactText.text(text);
                     }
 
                     if (!this.inputManager.isMobile && (!bindChangeAcknowledged || (object === undefined && isAction))) {
                         bindChangeAcknowledged = true;
 
-                        const icon = InputManager.getIconFromInputName(bind);
+                        const icon = bind === undefined ? undefined : InputManager.getIconFromInputName(bind);
 
                         if (icon === undefined) {
-                            interactKey.text(bind);
+                            interactKey.text(bind ?? "");
                         } else {
                             interactKey.html(`<img src="${icon}" alt="${bind}"/>`);
                         }
@@ -873,9 +889,6 @@ export class Game {
                                     // Don't pick up skins
                                     && type !== ItemType.Skin
                                 )
-
-                                // Don't autopickup if currently reloading gun
-                                && this.activePlayer.action?.type !== PlayerActions.Reload
                             ) || (
                                 type === ItemType.Gun
                                     && weapons?.some(
@@ -887,6 +900,7 @@ export class Game {
                                                     (
                                                         object?.definition === definition
                                                         && !definition.isDual
+                                                        && definition.dualVariant
                                                     ) // Picking up a single pistol when inventory has single pistol
                                                     || (
                                                         (
@@ -903,8 +917,7 @@ export class Game {
                     ) {
                         this.inputManager.addAction(InputActions.Loot);
                     } else if ( // Auto open doors
-                        this.console.getBuiltInCVar("cv_autopickup_dual_guns")
-                        && object instanceof Obstacle
+                        object instanceof Obstacle
                         && object.canInteract(player)
                         && object.definition.role === ObstacleSpecialRoles.Door
                         && object.door?.offset === 0

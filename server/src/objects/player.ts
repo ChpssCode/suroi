@@ -50,6 +50,7 @@ import { BaseGameObject, DamageParams, type GameObject } from "./gameObject";
 import { Loot } from "./loot";
 import { type Obstacle } from "./obstacle";
 import { SyncedParticle } from "./syncedParticle";
+import { HealingItems } from "../../../common/src/definitions/healingItems";
 export interface PlayerContainer {
     readonly teamID?: string
     readonly autoFill: boolean
@@ -115,19 +116,21 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
 
     private _health = this._maxHealth;
 
-    normalizedHealth = 0;
+    private _normalizedHealth = 0;
+    get normalizedHealth(): number { return this._normalizedHealth; }
 
     get health(): number { return this._health; }
     set health(health: number) {
         this._health = Math.min(health, this._maxHealth);
         this._team?.setDirty();
         this.dirty.health = true;
-        this.normalizedHealth = Numeric.remap(this.health, 0, this.maxHealth, 0, 1);
+        this._normalizedHealth = Numeric.remap(this.health, 0, this.maxHealth, 0, 1);
     }
 
     private _maxAdrenaline = GameConstants.player.maxAdrenaline;
 
-    normalizedAdrenaline = 0;
+    private _normalizedAdrenaline = 0;
+    get normalizedAdrenaline(): number { return this._normalizedAdrenaline; }
 
     get maxAdrenaline(): number { return this._maxAdrenaline; }
     set maxAdrenaline(maxAdrenaline: number) {
@@ -149,7 +152,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
     set adrenaline(adrenaline: number) {
         this._adrenaline = Numeric.clamp(adrenaline, this._minAdrenaline, this._maxAdrenaline);
         this.dirty.adrenaline = true;
-        this.normalizedAdrenaline = Numeric.remap(this.adrenaline, this.minAdrenaline, this.maxAdrenaline, 0, 1);
+        this._normalizedAdrenaline = Numeric.remap(this.adrenaline, this.minAdrenaline, this.maxAdrenaline, 0, 1);
     }
 
     private _modifiers = {
@@ -235,6 +238,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
         maxMinStats: true,
         adrenaline: true,
         weapons: true,
+        slotLocks: true,
         items: true,
         zoom: true
     };
@@ -348,7 +352,6 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
      */
     canDespawn = true;
 
-    lastSwitch = 0;
     lastFreeSwitch = 0;
     effectiveSwitchDelay = 0;
 
@@ -366,6 +369,8 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
     }
 
     set position(position: Vector) {
+        if (Vec.equals(position, this.position)) return;
+
         this.hitbox.position = position;
         this._team?.setDirty();
     }
@@ -435,10 +440,12 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
                 kills?: string
             ): void => {
                 const weaponDef = Loots.fromStringSafe<GunDefinition | MeleeDefinition>(weaponName);
-                //                                                ^ ok because undefined is ignored
+                let itemType: ItemType;
+
                 if (
                     weaponDef === undefined // no such item
-                    || ![ItemType.Gun, ItemType.Melee].includes(weaponDef.itemType) // neither gun nor melee
+                    || ![ItemType.Gun, ItemType.Melee].includes(itemType = weaponDef.itemType) // neither gun nor melee
+                    || GameConstants.player.inventorySlotTypings[slot] !== itemType // invalid type
                 ) return;
 
                 this.inventory.addOrReplaceWeapon(slot, weaponDef);
@@ -460,18 +467,19 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
                 this.inventory.items.setItem(ammoPtr, backpack.maxCapacity[ammoPtr]);
             };
 
-            determinePreset(0, weaponA, killsA);
-            determinePreset(1, weaponB, killB);
-            determinePreset(2, melee, killsM);
-
-            this.inventory.items.setItem("2x_scope", 1);
-            this.inventory.items.setItem("4x_scope", 1);
-            this.inventory.items.setItem("8x_scope", 1);
-            this.inventory.items.setItem("15x_scope", 1);
-            this.inventory.scope = "8x_scope";
             this.inventory.backpack = Loots.fromString("tactical_pack");
             this.inventory.vest = Loots.fromString("tactical_vest");
             this.inventory.helmet = Loots.fromString("tactical_helmet");
+
+            for (const { idString: item } of [...HealingItems, ...Scopes]) {
+                this.inventory.items.setItem(item, backpack.maxCapacity[item]);
+            }
+
+            this.inventory.scope = "8x_scope";
+
+            determinePreset(0, weaponA, killsA);
+            determinePreset(1, weaponB, killB);
+            determinePreset(2, melee, killsM);
         }
 
         this.updateAndApplyModifiers();
@@ -624,7 +632,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
             * recoilMultiplier                              // Recoil from items
             * (this.action?.speedMultiplier ?? 1)           // Speed modifier from performing actions
             * (1 + (this.adrenaline / 1000))                // Linear speed boost from adrenaline
-            * this.activeItemDefinition.speedMultiplier     // Active item speed modifier
+            * (this.downed ? 1 : this.activeItemDefinition.speedMultiplier)     // Active item speed modifier
             * (this.downed ? 0.5 : 1)                       // Knocked out speed multiplier
             * (this.beingRevivedBy ? 0.5 : 1)               // Being revived speed multiplier
             * this.modifiers.baseSpeed;                     // Current on-wearer modifier
@@ -790,7 +798,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
 
     private _firstPacket = true;
 
-    packetStream = new PacketStream(SuroiBitStream.alloc(1 << 16));
+    private readonly _packetStream = new PacketStream(SuroiBitStream.alloc(1 << 16));
 
     /**
      * Calculate visible objects, check team, and send packets
@@ -807,9 +815,10 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
             this.ticksSinceLastUpdate = 0;
             this.updateObjects = false;
 
+            const dim = player.zoom * 2 + 8;
             this.screenHitbox = RectangleHitbox.fromRect(
-                player.zoom * 2 + 8,
-                player.zoom * 2 + 8,
+                dim,
+                dim,
                 player.position
             );
 
@@ -846,8 +855,8 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
 
         // player data
         packet.playerData = {
-            normalizedHealth: player.normalizedHealth,
-            normalizedAdrenaline: player.normalizedAdrenaline,
+            normalizedHealth: player._normalizedHealth,
+            normalizedAdrenaline: player._normalizedAdrenaline,
             maxHealth: player.maxHealth,
             minAdrenaline: player.minAdrenaline,
             maxAdrenaline: player.maxAdrenaline,
@@ -858,6 +867,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
             dirty: player.dirty,
             inventory: {
                 activeWeaponIndex: inventory.activeWeaponIndex,
+                lockedSlots: inventory.lockedSlots,
                 scope: inventory.scope,
                 weapons: inventory.weapons.map(slot => {
                     const item = slot;
@@ -921,12 +931,14 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
             value: gas.completionRatio
         };
 
-        // new and deleted players
-        packet.newPlayers = this._firstPacket
+        const newPlayers = this._firstPacket
             ? [...game.grid.pool.getCategory(ObjectCategory.Player)]
             : game.newPlayers;
 
-        for (const teammate of (packet.newPlayers as Player[]).filter(p => p.teamID === player.teamID)) {
+        // new and deleted players
+        packet.newPlayers = newPlayers;
+
+        for (const teammate of newPlayers.filter(p => p.teamID === player.teamID)) {
             packet.fullObjectsCache.push(teammate);
         }
 
@@ -956,17 +968,17 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
         this.sendPacket(packet);
         this._firstPacket = false;
 
-        this.packetStream.stream.index = 0;
+        this._packetStream.stream.index = 0;
         for (const packet of this.packets) {
-            this.packetStream.serializeServerPacket(packet);
+            this._packetStream.serializeServerPacket(packet);
         }
 
         for (const packet of this.game.packets) {
-            this.packetStream.serializeServerPacket(packet);
+            this._packetStream.serializeServerPacket(packet);
         }
 
         this.packets.length = 0;
-        this.sendData(this.packetStream.getBuffer());
+        this.sendData(this._packetStream.getBuffer());
     }
 
     /**
@@ -1362,8 +1374,10 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
                 const { player, item } = downer;
 
                 ++player.kills;
-                if ((item instanceof GunItem || item instanceof MeleeItem)
-                    && player.inventory.weapons.includes(item)) {
+                if (
+                    (item instanceof GunItem || item instanceof MeleeItem)
+                    && player.inventory.weapons.includes(item)
+                ) {
                     const kills = ++item.stats.kills;
 
                     for (const entry of item.definition.wearerAttributes?.on?.kill ?? []) {
@@ -1401,7 +1415,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
                     if (
                         this.teamID === undefined // if we're in solos…
                         || source.teamID !== this.teamID // …or the killer is in a different team from the downer…
-                        || !attributeToDowner() // …or if the downer can't be found…
+                        || !attributeToDowner() // …or if attributing to the downer fails (because they can't be found)…
                     ) {
                         attributeToPlayer(source); // …then attribute to the killer
                     }
@@ -1447,6 +1461,7 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
         //
 
         // Drop weapons
+        this.inventory.unlockAll();
         this.inventory.dropWeapons();
 
         // Drop inventory items
@@ -1627,14 +1642,16 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
 
         const inventory = this.inventory;
         for (const action of packet.actions) {
-            switch (action.type) {
+            const type = action.type;
+
+            switch (type) {
                 case InputActions.UseItem: {
                     inventory.useItem(action.item);
                     break;
                 }
                 case InputActions.EquipLastItem:
                 case InputActions.EquipItem: {
-                    const target = action.type === InputActions.EquipItem
+                    const target = type === InputActions.EquipItem
                         ? action.slot
                         : inventory.lastWeaponIndex;
 
@@ -1659,6 +1676,22 @@ export class Player extends BaseGameObject<ObjectCategory.Player> {
                 }
                 case InputActions.SwapGunSlots: {
                     inventory.swapGunSlots();
+                    break;
+                }
+                case InputActions.LockSlot: {
+                    inventory.lock(action.slot);
+                    break;
+                }
+                case InputActions.UnlockSlot: {
+                    inventory.unlock(action.slot);
+                    break;
+                }
+                case InputActions.ToggleSlotLock: {
+                    const slot = action.slot;
+
+                    inventory.isLocked(slot)
+                        ? inventory.unlock(slot)
+                        : inventory.lock(slot);
                     break;
                 }
                 case InputActions.Loot: {

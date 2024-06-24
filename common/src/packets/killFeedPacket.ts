@@ -13,7 +13,7 @@ import { type ExplosionDefinition, Explosions } from "../definitions/explosions"
 import { type LootDefinition, Loots } from "../definitions/loots";
 import { ObjectDefinitions } from "../utils/objectDefinitions";
 import { type SuroiBitStream, calculateEnumPacketBits } from "../utils/suroiBitStream";
-import { Packet } from "./packet";
+import { type Packet } from "./packet";
 
 const KILLFEED_MESSAGE_TYPE_BITS = calculateEnumPacketBits(KillfeedMessageType);
 const KILLFEED_EVENT_TYPE_BITS = calculateEnumPacketBits(KillfeedEventType);
@@ -33,7 +33,7 @@ interface KillFeedMessageOptions {
     weaponUsed?: LootDefinition | ExplosionDefinition
 }
 
-export class KillFeedPacket extends Packet implements KillFeedMessageOptions {
+export class KillFeedPacket implements Packet, KillFeedMessageOptions {
     messageType!: KillfeedMessageType;
     victimId?: number;
     eventType?: KillfeedEventType;
@@ -71,7 +71,12 @@ export class KillFeedPacket extends Packet implements KillFeedMessageOptions {
                     [
                         KillfeedEventType.NormalTwoParty,
                         KillfeedEventType.FinishedOff,
-                        KillfeedEventType.FinallyKilled
+                        KillfeedEventType.FinallyKilled,
+
+                        KillfeedEventType.Gas,
+                        KillfeedEventType.BleedOut,
+                        KillfeedEventType.Airdrop
+                        // ^^ for these three, attackerId corresponds to the player who downed
                     ].includes(type)
                 ) {
                     const hasAttacker = this.attackerId !== undefined;
@@ -83,7 +88,14 @@ export class KillFeedPacket extends Packet implements KillFeedMessageOptions {
                 }
                 stream.writeBits(this.severity ?? KillfeedEventSeverity.Kill, KILLFEED_EVENT_SEVERITY_BITS);
 
-                const weaponWasUsed = this.weaponUsed !== undefined;
+                const weaponWasUsed = this.weaponUsed !== undefined
+                    && ![
+                        KillfeedEventType.FinallyKilled,
+                        KillfeedEventType.Gas,
+                        KillfeedEventType.BleedOut,
+                        KillfeedEventType.Airdrop
+                    ].includes(type);
+
                 stream.writeBoolean(weaponWasUsed);
                 if (weaponWasUsed) {
                     damageSourcesDefinitions.writeToStream(stream, this.weaponUsed!);
@@ -123,7 +135,12 @@ export class KillFeedPacket extends Packet implements KillFeedMessageOptions {
                     [
                         KillfeedEventType.NormalTwoParty,
                         KillfeedEventType.FinishedOff,
-                        KillfeedEventType.FinallyKilled
+                        KillfeedEventType.FinallyKilled,
+
+                        KillfeedEventType.Gas,
+                        KillfeedEventType.BleedOut,
+                        KillfeedEventType.Airdrop
+                        // ^^ attackerId is whoever downed
                     ].includes(type)
                     && stream.readBoolean() // attacker present
                 ) {

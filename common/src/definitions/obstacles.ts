@@ -65,46 +65,61 @@ export type ObstacleDefinition = ObjectDefinition & {
         readonly activated?: string
     }
 
+    readonly wall?: {
+        readonly color: number
+        readonly borderColor: number
+    }
+
     readonly imageAnchor?: Vector
     readonly spawnMode: MapObjectSpawnMode
     readonly tint?: number
     readonly particlesOnDestroy?: SyncedParticleSpawnerDefinition
     readonly additionalDestroySounds: string[]
-} & (({
-    readonly role: ObstacleSpecialRoles.Door
-    readonly locked?: boolean
-    readonly openOnce?: boolean
-    readonly animationDuration?: number
-    readonly doorSound?: string
-} & ({
-    readonly operationStyle?: "swivel"
-    readonly hingeOffset: Vector
-} | {
-    readonly operationStyle: "slide"
-    /**
-     * Determines how much the door slides. 1 means it'll be displaced by its entire width,
-     * 0.5 means it'll be displaced by half its width, etc
-     */
-    readonly slideFactor?: number
-})) | {
-    readonly role: ObstacleSpecialRoles.Activatable
     readonly sound?: ({ readonly name: string } | { readonly names: string[] }) & {
         readonly maxRange?: number
         readonly falloff?: number
     }
-    readonly requiredItem?: ReferenceTo<LootDefinition>
-    readonly interactText?: string
-    readonly emitParticles?: boolean
-    readonly replaceWith?: {
-        readonly idString: Record<ReferenceTo<ObstacleDefinition>, number> | ReferenceTo<ObstacleDefinition>
-        readonly delay: number
+} & (
+    (
+        {
+            readonly role: ObstacleSpecialRoles.Door
+            readonly locked?: boolean
+            readonly openOnce?: boolean
+            readonly animationDuration?: number
+            readonly doorSound?: string
+        } & (
+            {
+                readonly operationStyle?: "swivel"
+                readonly hingeOffset: Vector
+            } | {
+                readonly operationStyle: "slide"
+                /**
+                 * Determines how much the door slides. 1 means it'll be displaced by its entire width,
+                 * 0.5 means it'll be displaced by half its width, etc
+                 */
+                readonly slideFactor?: number
+            }
+        )
+    ) | {
+        readonly role: ObstacleSpecialRoles.Activatable
+        readonly sound?: ({ readonly name: string } | { readonly names: string[] }) & {
+            readonly maxRange?: number
+            readonly falloff?: number
+        }
+        readonly requiredItem?: ReferenceTo<LootDefinition>
+        readonly interactText?: string
+        readonly emitParticles?: boolean
+        readonly replaceWith?: {
+            readonly idString: Record<ReferenceTo<ObstacleDefinition>, number> | ReferenceTo<ObstacleDefinition>
+            readonly delay: number
+        }
+    } | {
+        readonly role: ObstacleSpecialRoles.Window
+        readonly noCollisionAfterDestroyed?: boolean
+    } | {
+        readonly role?: ObstacleSpecialRoles.Wall
     }
-} | {
-    readonly role: ObstacleSpecialRoles.Window
-    readonly noCollisionAfterDestroyed?: boolean
-} | {
-    readonly role?: ObstacleSpecialRoles.Wall
-});
+);
 
 export const Materials = [
     "tree",
@@ -180,6 +195,7 @@ export const Obstacles = ObjectDefinitions.create<ObstacleDefinition>()(
             idString: `house_wall_${lengthNumber}`,
             name: `House Wall ${lengthNumber}`,
             material: "wood",
+            hideOnMap: true,
             noResidue: true,
             health: 170,
             scale: {
@@ -191,6 +207,10 @@ export const Obstacles = ObjectDefinitions.create<ObstacleDefinition>()(
             allowFlyover: FlyoverPref.Never,
             frames: {
                 particle: "wall_particle"
+            },
+            wall: {
+                borderColor: 0x4a4134,
+                color: 0xafa08c
             },
             role: ObstacleSpecialRoles.Wall
         }),
@@ -801,6 +821,24 @@ export const Obstacles = ObjectDefinitions.create<ObstacleDefinition>()(
             hitbox: new CircleHitbox(4),
             spawnHitbox: new CircleHitbox(4.5),
             rotationMode: RotationMode.Full,
+            hasLoot: true
+        },
+        {
+            idString: "loot_tree",
+            name: "Loot Tree",
+            material: "stone",
+            hideOnMap: true,
+            health: 250,
+            scale: {
+                spawnMin: 0.9,
+                spawnMax: 1,
+                destroy: 0.75
+            },
+            hitbox: new CircleHitbox(5.5),
+            spawnHitbox: new CircleHitbox(15),
+            rotationMode: RotationMode.Full,
+            zIndex: ZIndexes.ObstaclesLayer4,
+            allowFlyover: FlyoverPref.Never,
             hasLoot: true
         },
         {
@@ -2962,6 +3000,18 @@ export const Obstacles = ObjectDefinitions.create<ObstacleDefinition>()(
                 particle: "metal_particle"
             },
             rotationMode: RotationMode.Limited
+        },
+        {
+            idString: "test_wall",
+            name: "Test Wall",
+            material: "wood",
+            health: 200,
+            hitbox: RectangleHitbox.fromRect(20, 2),
+            rotationMode: RotationMode.Limited,
+            wall: {
+                color: 0xffaa00,
+                borderColor: 0xff0000
+            }
         }
     ]
 );

@@ -714,9 +714,31 @@ export type BaseBulletDefinition = {
         readonly zIndex: ZIndexes
     }
 
+    readonly trail?: {
+        readonly interval: number
+        readonly amount?: number
+        readonly frame: string
+        readonly scale: {
+            readonly min: number
+            readonly max: number
+        }
+        readonly alpha: {
+            readonly min: number
+            readonly max: number
+        }
+        readonly spreadSpeed: {
+            readonly min: number
+            readonly max: number
+        }
+        readonly lifetime: {
+            readonly min: number
+            readonly max: number
+        }
+        readonly tint: number
+    }
+
     readonly rangeVariance?: number
     readonly shrapnel: boolean
-    readonly onHitExplosion?: ReferenceTo<ExplosionDefinition>
     readonly allowRangeOverride: boolean
     readonly lastShotFX: boolean
     readonly noCollision: boolean

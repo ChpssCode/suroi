@@ -6,13 +6,13 @@ import { MapPacket } from "../../common/src/packets/mapPacket";
 import { PacketStream } from "../../common/src/packets/packetStream";
 import { type Orientation, type Variation } from "../../common/src/typings";
 import { CircleHitbox, HitboxGroup, RectangleHitbox, type Hitbox } from "../../common/src/utils/hitbox";
-import { Angle, Collision, Geometry, Numeric } from "../../common/src/utils/math";
+import { Angle, Collision, Geometry, Numeric, τ } from "../../common/src/utils/math";
 import { MapObjectSpawnMode, ObstacleSpecialRoles, type ReferenceTo, type ReifiableDef } from "../../common/src/utils/objectDefinitions";
-import { SeededRandom, pickRandomInArray, random, randomFloat, randomRotation, randomVector } from "../../common/src/utils/random";
+import { SeededRandom, pickRandomInArray, random, randomFloat, randomPointInsideCircle, randomRotation, randomVector } from "../../common/src/utils/random";
 import { River, Terrain } from "../../common/src/utils/terrain";
 import { Vec, type Vector } from "../../common/src/utils/vector";
 import { LootTables, type WeightedItem } from "./data/lootTables";
-import { Maps } from "./data/maps";
+import { Maps, ObstacleClump } from "./data/maps";
 import { type Game } from "./game";
 import { Building } from "./objects/building";
 import { Decal } from "./objects/decal";
@@ -24,10 +24,10 @@ export class GameMap {
     readonly game: Game;
 
     private readonly quadBuildingLimit: Record<ReferenceTo<BuildingDefinition>, number> = {};
-    private readonly quadBuildingCounts: Array<Record<string, number>> = [];
 
-    private readonly majorBuildings: string[];
+    private readonly majorBuildings: readonly string[];
     private readonly occupiedQuadrants: number[] = [];
+    private readonly quadBuildings: { [key in 1 | 2 | 3 | 4]: string[] };
 
     private readonly occupiedBridgePositions: Vector[] = [];
 
@@ -69,6 +69,13 @@ export class GameMap {
 
         this.quadBuildingLimit = mapDef.quadBuildingLimit ?? {};
         this.majorBuildings = mapDef.majorBuildings ?? [];
+
+        this.quadBuildings = {
+            1: [],
+            2: [],
+            3: [],
+            4: []
+        };
 
         // + 8 to account for the jagged points
         const beachPadding = this._beachPadding = mapDef.oceanSize + mapDef.beachSize + 8;
@@ -165,6 +172,10 @@ export class GameMap {
 
         Object.entries(mapDef.buildings ?? {}).forEach(([building, count]) => this.generateBuildings(building, count));
 
+        for (const clump of mapDef.obstacleClumps ?? []) {
+            this.generateObstacleClumps(clump);
+        };
+
         Object.entries(mapDef.obstacles ?? {}).forEach(([obstacle, count]) => this.generateObstacles(obstacle, count));
 
         Object.entries(mapDef.loots ?? {}).forEach(([loot, count]) => this.generateLoots(loot, count));
@@ -188,6 +199,10 @@ export class GameMap {
         const stream = new PacketStream(new ArrayBuffer(1 << 16));
         stream.serializeServerPacket(packet);
         this.buffer = stream.getBuffer();
+    }
+
+    addBuildingToQuad(quad: 1 | 2 | 3 | 4, idString: string): void {
+        this.quadBuildings[quad].push(idString);
     }
 
     generateRiver(
@@ -269,50 +284,49 @@ export class GameMap {
         if (!definition.bridgeSpawnOptions) {
             const { idString, rotationMode } = definition;
             let attempts = 0;
+
             for (let i = 0; i < count; i++) {
-                let orientation = GameMap.getRandomBuildingOrientation(rotationMode);
+                let validPositionFound = false;
 
-                const position = this.getRandomPosition(definition.spawnHitbox, {
-                    orientation,
-                    spawnMode: definition.spawnMode,
-                    getOrientation: (newOrientation: Orientation) => {
-                        orientation = newOrientation;
-                    },
-                    maxAttempts: 400
-                });
-                if (!position) {
-                    Logger.warn(`Failed to find valid position for building ${idString}`);
-                    continue;
-                }
+                while (!validPositionFound && attempts < 100) {
+                    let orientation = GameMap.getRandomBuildingOrientation(rotationMode);
 
-                const quad = this.getQuadrant(position.x, position.y, this.width, this.height);
+                    const position = this.getRandomPosition(definition.spawnHitbox, {
+                        orientation,
+                        spawnMode: definition.spawnMode,
+                        getOrientation: (newOrientation: Orientation) => {
+                            orientation = newOrientation;
+                        },
+                        maxAttempts: 400
+                    });
 
-                if (this.majorBuildings.includes(idString)) {
-                    if (this.occupiedQuadrants.includes(quad) && attempts < 100) {
-                        i--;
-                        attempts++;
+                    if (!position) {
+                        Logger.warn(`Failed to find valid position for building ${idString}`);
                         continue;
                     }
-                    this.occupiedQuadrants.push(quad);
-                }
 
-                if (idString in this.quadBuildingLimit) {
-                    this.quadBuildingCounts[quad] ??= {};
-                    const quadCounts = this.quadBuildingCounts[quad];
-                    if (
-                        quadCounts[idString] !== undefined
-                        && quadCounts[idString] >= this.quadBuildingLimit[idString]
-                        && attempts < 100
-                    ) {
-                        i--;
-                        attempts++;
-                        continue;
+                    const quad = this.getQuadrant(position.x, position.y, this.width, this.height) as 1 | 2 | 3 | 4;
+
+                    if (idString in this.quadBuildingLimit) {
+                        const limit = this.quadBuildingLimit[idString];
+                        const count = this.quadBuildings[quad].filter((b: string) => b === idString).length;
+
+                        if (count >= limit) {
+                            attempts++;
+                            continue;  // Try to find a different position
+                        }
                     }
-                    quadCounts[idString] = (quadCounts[idString] ?? 0) + 1;
+
+                    this.generateBuilding(definition, position, orientation);
+                    this.addBuildingToQuad(quad, idString);
+                    validPositionFound = true;
                 }
 
-                attempts = 0;
-                this.generateBuilding(definition, position, orientation);
+                if (!validPositionFound) {
+                    Logger.warn(`Failed to place building ${idString} after ${attempts} attempts`);
+                }
+
+                attempts = 0; // Reset attempts counter for the next building
             }
         } else {
             const { bridgeSpawnOptions } = definition;
@@ -352,6 +366,10 @@ export class GameMap {
                         Vec.addAdjust(position, Vec.create(0, -landCheckDist), bestOrientation)
                     ].some(point => this.terrain.getFloor(point) === "water")
                 ) return;
+                // checks if the distance between this position and the new bridge's position is less than bridgeSpawnOptions.minRiverWidth HOPEFULLY fixing the spawn problems
+                if (this.occupiedBridgePositions.some(pos => Math.sqrt((pos.x - position.x) ** 2 + (pos.y - position.y) ** 2) < bridgeSpawnOptions.minRiverWidth)) {
+                    return;
+                }
 
                 this.occupiedBridgePositions.push(position);
                 this.generateBuilding(definition, position, bestOrientation);
@@ -511,11 +529,46 @@ export class GameMap {
             puzzlePiece
         );
 
-        if (!definition.hideOnMap) this.packet.objects.push(obstacle);
+        if (!definition.hideOnMap && !definition.invisible) this.packet.objects.push(obstacle);
         this.game.grid.addObject(obstacle);
         this.game.updateObjects = true;
         this.game.pluginManager.emit(Events.Obstacle_Generated, obstacle);
         return obstacle;
+    }
+
+    generateObstacleClumps(clumpDef: ObstacleClump): void {
+        const clumpAmount = clumpDef.clumpAmount;
+        const firstObstacle = Obstacles.reify(clumpDef.clump.obstacles[0]);
+
+        const { clump: { obstacles, minAmount, maxAmount, radius, jitter } } = clumpDef;
+
+        for (let i = 0; i < clumpAmount; i++) {
+            const position = this.getRandomPosition(
+                new CircleHitbox(radius + jitter),
+                {
+                    spawnMode: firstObstacle.spawnMode
+                }
+            );
+
+            if (!position) {
+                Logger.warn("Spawn position cannot be found");
+                continue;
+            }
+
+            const amountOfObstacles = random(minAmount, maxAmount);
+            const offset = randomRotation();
+            const step = τ / amountOfObstacles;
+
+            for (let j = 0; j < amountOfObstacles; j++) {
+                this.generateObstacle(
+                    pickRandomInArray(obstacles),
+                    Vec.add(
+                        randomPointInsideCircle(position, jitter),
+                        Vec.fromPolar(j * step + offset, radius)
+                    )
+                );
+            }
+        }
     }
 
     generateLoots(table: keyof typeof LootTables, count: number): void {
